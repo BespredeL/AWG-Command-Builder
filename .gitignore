@@ -1,0 +1,31 @@
+# Build artifacts (local/CI outputs)
+/AWG-Command-Builder.exe
+*.exe~
+*.test
+*.out
+coverage.out
+*.coverprofile
+
+# Go workspace caches
+/bin/
+/dist/
+/build/
+/assets-src/
+
+# Environment and local overrides
+.env
+.env.*
+*.local
+
+# Logs and temporary files
+*.log
+/tmp/
+/temp/
+
+# Editor/IDE
+.idea/
+.vscode/
+
+# OS metadata
+.DS_Store
+Thumbs.db

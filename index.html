@@ -1,0 +1,1563 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>AWG Command Builder</title>
+    <style>
+        :root {
+            --bg: #070c18;
+            --card: #0d1424;
+            --card2: #0a1020;
+            --line: #1e2d4a;
+            --line2: #283a5e;
+            --text: #dce8ff;
+            --muted: #7a90b8;
+            --accent: #3db8f5;
+            --ok: #1fd98a;
+            --warn: #f0a943;
+            --err: #f0564a;
+            --mono: 'JetBrains Mono', Consolas, monospace;
+            --sans: 'Syne', system-ui, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--sans);
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* Subtle grid background */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: linear-gradient(rgba(61, 184, 245, .025) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(61, 184, 245, .025) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Toast */
+        #toasts {
+            position: fixed;
+            top: 14px;
+            right: 14px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+
+        .toast {
+            padding: 10px 15px;
+            border-radius: 10px;
+            font-size: .82rem;
+            font-family: var(--sans);
+            font-weight: 600;
+            pointer-events: auto;
+            animation: toastIn .2s ease both;
+            max-width: 300px;
+            line-height: 1.3;
+        }
+
+        .toast-ok {
+            background: rgba(31, 217, 138, .12);
+            border: 1px solid rgba(31, 217, 138, .35);
+            color: #7af0c0;
+        }
+
+        .toast-err {
+            background: rgba(240, 86, 74, .12);
+            border: 1px solid rgba(240, 86, 74, .35);
+            color: #ffa49e;
+        }
+
+        .toast-info {
+            background: rgba(61, 184, 245, .10);
+            border: 1px solid rgba(61, 184, 245, .3);
+            color: #90d8fb;
+        }
+
+        @keyframes toastIn {
+            from {
+                opacity: 0;
+                transform: translateX(14px);
+            }
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        /* Layout */
+        .wrap {
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 20px 16px 60px;
+            display: grid;
+            gap: 14px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Card */
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 18px;
+        }
+
+        /* Section header */
+        .sh {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .sh-num {
+            width: 22px;
+            height: 22px;
+            border-radius: 6px;
+            background: var(--accent);
+            color: #041020;
+            font-size: .72rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .sh-title {
+            font-size: .95rem;
+            font-weight: 700;
+        }
+
+        .sh-desc {
+            font-size: .78rem;
+            color: var(--muted);
+            margin-top: 1px;
+        }
+
+        /* Grid */
+        .grid {
+            display: grid;
+            gap: 10px;
+        }
+
+        .g2 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .g3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .g4 {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        /* Fields */
+        .field {
+            display: grid;
+            gap: 5px;
+            font-size: .78rem;
+            font-weight: 600;
+            color: var(--muted);
+            letter-spacing: .02em;
+            text-transform: uppercase;
+        }
+
+        input, select, textarea, button {
+            font: inherit;
+        }
+
+        input[type=text],
+        input[type=number],
+        input[type=password],
+        select,
+        textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--line2);
+            background: var(--card2);
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: .88rem;
+            transition: border-color .15s, box-shadow .15s;
+        }
+
+        input[type=text]:focus,
+        input[type=number]:focus,
+        input[type=password]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(61, 184, 245, .15);
+        }
+
+        input::placeholder, textarea::placeholder {
+            color: #3d5070;
+        }
+
+        textarea {
+            min-height: 86px;
+            resize: vertical;
+            font-family: var(--mono);
+            font-size: .8rem;
+            line-height: 1.45;
+        }
+
+        /* Chip/toggle */
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            border: 1px solid var(--line2);
+            background: var(--card2);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: .82rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: var(--muted);
+            transition: border-color .15s, color .15s;
+            user-select: none;
+        }
+
+        .chip:has(input:checked),
+        .chip input:checked ~ * {
+            color: var(--text);
+        }
+
+        .chip:has(input:checked) {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+
+        input[type=checkbox] {
+            accent-color: var(--accent);
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Buttons */
+        button {
+            padding: 9px 15px;
+            border-radius: 10px;
+            border: 1px solid var(--accent);
+            background: linear-gradient(180deg, rgba(61, 184, 245, .2), rgba(14, 165, 233, .15));
+            color: var(--accent);
+            font-weight: 700;
+            font-size: .84rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: opacity .15s, transform .1s, box-shadow .15s;
+            white-space: nowrap;
+            letter-spacing: .01em;
+        }
+
+        button:hover {
+            opacity: .85;
+            box-shadow: 0 0 12px rgba(61, 184, 245, .15);
+        }
+
+        button:active {
+            transform: scale(.97);
+        }
+
+        button:disabled {
+            opacity: .35;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        button.sec {
+            border-color: var(--line2);
+            background: rgba(255, 255, 255, .03);
+            color: var(--muted);
+        }
+
+        button.sec:hover {
+            color: var(--text);
+            border-color: var(--line2);
+        }
+
+        button.ok-btn {
+            border-color: var(--ok);
+            background: linear-gradient(180deg, rgba(31, 217, 138, .18), rgba(16, 185, 129, .12));
+            color: var(--ok);
+        }
+
+        button.ok-btn:hover {
+            box-shadow: 0 0 12px rgba(31, 217, 138, .2);
+        }
+
+        /* Row */
+        .row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        /* Spinner */
+        .spin {
+            width: 13px;
+            height: 13px;
+            border: 2px solid rgba(255, 255, 255, .2);
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: rotate .55s linear infinite;
+            flex-shrink: 0;
+        }
+
+        @keyframes rotate {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Output */
+        .out {
+            white-space: pre-wrap;
+            word-break: break-word;
+            border: 1px solid var(--line);
+            background: #040810;
+            border-radius: 10px;
+            padding: 14px;
+            font-family: var(--mono);
+            font-size: .84rem;
+            line-height: 1.55;
+            min-height: 52px;
+            color: #c0d8f8;
+        }
+
+        .out:empty::before {
+            content: '- команда не сформирована -';
+            color: #263450;
+            font-style: italic;
+        }
+
+        /* Divider */
+        .div {
+            height: 1px;
+            background: var(--line);
+            margin: 14px 0;
+        }
+
+        /* Status inline */
+        .st {
+            font-size: .8rem;
+            color: var(--muted);
+            font-family: var(--sans);
+        }
+
+        .st.ok {
+            color: var(--ok);
+        }
+
+        .st.err {
+            color: var(--err);
+        }
+
+        /* Connection indicator */
+        .conn-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: .78rem;
+            font-weight: 700;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+            padding: 5px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--line2);
+            background: var(--card2);
+            color: var(--muted);
+        }
+
+        .conn-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #2a3e60;
+            transition: background .3s, box-shadow .3s;
+            flex-shrink: 0;
+        }
+
+        .conn-dot.on {
+            background: var(--ok);
+            box-shadow: 0 0 7px rgba(31, 217, 138, .6);
+        }
+
+        .conn-dot.err {
+            background: var(--err);
+            box-shadow: 0 0 7px rgba(240, 86, 74, .4);
+        }
+
+        .conn-dot.blink {
+            animation: blink .7s ease-in-out infinite alternate;
+        }
+
+        @keyframes blink {
+            from {
+                opacity: .25;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* CORS warning */
+        .cors-warn {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            background: rgba(240, 169, 67, .06);
+            border: 1px solid rgba(240, 169, 67, .25);
+            border-radius: 10px;
+            padding: 11px 14px;
+            font-size: .8rem;
+            color: #fcd074;
+            margin-bottom: 14px;
+        }
+
+        .cors-warn code {
+            font-family: var(--mono);
+            font-size: .78rem;
+            background: rgba(0, 0, 0, .4);
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+
+        /* Interface chips */
+        .iface-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .iface-chip {
+            font-family: var(--mono);
+            font-size: .78rem;
+            padding: 5px 10px;
+            border-radius: 7px;
+            border: 1px solid var(--line2);
+            background: var(--card2);
+            cursor: pointer;
+            transition: border-color .15s, background .15s, color .15s;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .iface-chip:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(61, 184, 245, .06);
+        }
+
+        .iface-chip.wg {
+            border-color: rgba(61, 184, 245, .4);
+            color: var(--accent);
+        }
+
+        .iface-chip.active {
+            border-color: var(--ok);
+            color: var(--ok);
+            background: rgba(31, 217, 138, .07);
+        }
+
+        /* API Response box */
+        .api-box {
+            display: none;
+            margin-top: 12px;
+            padding: 11px 13px;
+            border-radius: 10px;
+            border: 1px solid var(--line);
+            background: #040810;
+            font-family: var(--mono);
+            font-size: .76rem;
+            line-height: 1.5;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--muted);
+        }
+
+        .api-box.show {
+            display: block;
+        }
+
+        .api-box.ok-resp {
+            border-color: rgba(31, 217, 138, .3);
+            color: #7af0c0;
+        }
+
+        .api-box.err-resp {
+            border-color: rgba(240, 86, 74, .3);
+            color: #ffa49e;
+        }
+
+        /* Scrollbar*/
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #263252;
+            border-radius: 3px;
+        }
+
+        .header-card {
+            border-color: #1a2d4e;
+            background: linear-gradient(120deg, #0d1728, #0a1320);
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .app-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: -.01em;
+            margin-bottom: 5px;
+        }
+
+        .app-desc {
+            color: var(--muted);
+            font-size: .83rem;
+        }
+
+        .app-desc-hotkey {
+            color: #3a5070;
+            margin-left: 4px;
+        }
+
+        .lang-field {
+            min-width: 260px;
+            text-align: left;
+        }
+
+        .field-span-all {
+            grid-column: 1 / -1;
+        }
+
+        .row-mt-10 {
+            margin-top: 10px;
+        }
+
+        .field-align-end {
+            align-content: end;
+        }
+
+        .row-align-self-end {
+            align-self: end;
+        }
+
+        .st-mt-6 {
+            margin-top: 6px;
+        }
+
+        .grid-mt-12 {
+            margin-top: 12px;
+        }
+
+        .row-mb-12 {
+            margin-bottom: 12px;
+        }
+
+        .api-card {
+            border-color: #1a2d4a;
+        }
+
+        .sh-num-ok {
+            background: var(--ok);
+            color: #021a10;
+        }
+
+        .conn-wrap {
+            margin-left: auto;
+            flex-shrink: 0;
+        }
+
+        .row-mt-12 {
+            margin-top: 12px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .st-mb-8 {
+            margin-bottom: 8px;
+        }
+
+        .footer-note {
+            text-align: center;
+            color: var(--muted);
+            font-size: .78rem;
+            opacity: .85;
+            padding: 6px 4px 2px;
+        }
+
+        .iface-icon {
+            opacity: .6;
+        }
+
+        .dev-link {
+            color: rgba(255, 255, 255, 1);
+        }
+
+        /* Responsive */
+        @media (max-width: 860px) {
+            .g3, .g4 {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 520px) {
+            .g2, .g3, .g4 {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<div id="toasts"></div>
+
+<main class="wrap">
+
+    <!-- Header -->
+    <section class="card header-card">
+        <div class="header-top">
+            <div>
+                <h1 id="appTitle" class="app-title">
+                    AWG Command Builder
+                </h1>
+                <p class="app-desc">
+                    <span id="appDescMain">Сформируйте CLI-команду и отправьте её напрямую на роутер Keenetic / Netcraze через RCI API.</span>
+                    <span id="appDescHotkey"
+                          class="app-desc-hotkey">· Ctrl+Enter → сформировать команду</span>
+                </p>
+            </div>
+            <div class="field lang-field">
+                <span id="langLabel">Язык</span>
+                <div class="row">
+                    <select id="langSelect"></select>
+                    <button id="btnExportLang" type="button" class="sec"><span id="btnExportLangText">Выгрузить languages.json из EXE</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 1. Config -->
+    <section class="card">
+        <div class="sh">
+            <div class="sh-num">1</div>
+            <div>
+                <div id="sec1Title" class="sh-title">Конфигурация интерфейса</div>
+                <div id="sec1Desc" class="sh-desc">Имя, режим и загрузка .conf файла AWG</div>
+            </div>
+        </div>
+        <div class="grid g3">
+            <label class="field"><span id="lblIfName">Имя интерфейса</span>
+                <input id="ifName" type="text" value="Wireguard0" placeholder="Wireguard0"/>
+            </label>
+            <label class="field"><span id="lblMode">Режим</span>
+                <select id="mode">
+                    <option value="create">create</option>
+                    <option value="reconfigure" selected>reconfigure</option>
+                </select>
+            </label>
+            <label class="field field-span-all"><span id="lblCfg">Конфиг AWG (.conf / .txt)</span>
+                <input id="cfgFile" type="file" accept=".conf,.txt"/>
+            </label>
+        </div>
+        <div class="row row-mt-10">
+            <button id="btnLoadCfg" type="button" class="sec">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <span id="btnLoadCfgText">Загрузить конфиг</span>
+            </button>
+            <span id="parseStatus" class="st">Выберите .conf файл</span>
+        </div>
+    </section>
+
+    <!-- 2. ASC params -->
+    <section class="card">
+        <div class="sh">
+            <div class="sh-num">2</div>
+            <div>
+                <div id="sec2Title" class="sh-title">ASC параметры</div>
+                <div id="sec2Desc" class="sh-desc">Параметры обфускации WireGuard трафика</div>
+            </div>
+        </div>
+        <div class="grid g4">
+            <label class="field">jc <input id="jc" type="number" value="0" min="0" max="255"></label>
+            <label class="field">jmin<input id="jmin" type="number" value="0" min="0"></label>
+            <label class="field">jmax<input id="jmax" type="number" value="0" min="0"></label>
+            <label class="field">s1 <input id="s1" type="number" value="0" min="0"></label>
+            <label class="field">s2 <input id="s2" type="number" value="0" min="0"></label>
+            <label class="field">h1 <input id="h1" type="number" value="0" min="0"></label>
+            <label class="field">h2 <input id="h2" type="number" value="0" min="0"></label>
+            <label class="field">h3 <input id="h3" type="number" value="0" min="0"></label>
+            <label class="field">h4 <input id="h4" type="number" value="0" min="0"></label>
+            <label class="field">s3 <input id="s3" type="number" value="0" min="0"></label>
+            <label class="field">s4 <input id="s4" type="number" value="0" min="0"></label>
+            <div class="field field-align-end">
+                <label class="chip">
+                    <input id="useExtended" type="checkbox" checked>
+                    <span id="useExtendedText">использовать i1..i5</span>
+                </label>
+            </div>
+        </div>
+    </section>
+
+    <!-- 3. I1..I5 -->
+    <section class="card">
+        <div class="sh">
+            <div class="sh-num">3</div>
+            <div>
+                <div id="sec3Title" class="sh-title">I1..I5 - Special Junk Packet</div>
+                <div id="sec3Desc" class="sh-desc">Загрузите список циклов или введите значения вручную</div>
+            </div>
+        </div>
+        <div class="grid g3">
+            <label class="field"><span id="lblIlistUrl">URL I-list JSON</span>
+                <input id="ilistUrl" type="text"
+                       value="https://voidwaifu.github.io/Special-Junk-Packet-List/I-list1.json"/>
+            </label>
+            <label class="field"><span id="lblIlistFile">I-list1.json (локальный файл)</span>
+                <input id="ilistFile" type="file" accept=".json,application/json"/>
+            </label>
+            <label class="field"><span id="lblCycleSelect">Выбрать набор</span>
+                <select id="cycleSelect">
+                    <option value="">- вручную -</option>
+                </select>
+            </label>
+            <div class="row row-align-self-end">
+                <button id="btnLoadIListUrl" class="sec" type="button"><span id="btnLoadIListUrlText">По URL</span>
+                </button>
+                <button id="btnLoadIList" class="sec" type="button"><span id="btnLoadIListText">Из файла</span></button>
+                <button id="btnRandomCycle" class="sec" type="button">🎲 <span id="btnRandomCycleText">Случайный</span>
+                </button>
+            </div>
+        </div>
+        <div id="ilistHint" class="st st-mt-6"></div>
+        <div class="grid g3 grid-mt-12">
+            <label class="field">i1 <textarea id="i1">0</textarea></label>
+            <label class="field">i2 <textarea id="i2">0</textarea></label>
+            <label class="field">i3 <textarea id="i3">0</textarea></label>
+            <label class="field">i4 <textarea id="i4">0</textarea></label>
+            <label class="field">i5 <textarea id="i5">0</textarea></label>
+        </div>
+    </section>
+
+    <!-- 4. Result -->
+    <section class="card">
+        <div class="sh">
+            <div class="sh-num">4</div>
+            <div>
+                <div id="sec4Title" class="sh-title">Готовая команда</div>
+                <div id="sec4Desc" class="sh-desc">CLI-команда для Keenetic - можно скопировать или отправить ниже</div>
+            </div>
+        </div>
+        <div class="row row-mb-12">
+            <button id="btnBuild" type="button">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <span id="btnBuildText">Сформировать команду</span>
+            </button>
+            <button id="btnCopy" type="button" class="sec">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                <span id="btnCopyText">Скопировать</span>
+            </button>
+        </div>
+        <pre id="result" class="out"></pre>
+    </section>
+
+    <!-- 5. Keenetic API -->
+    <section class="card api-card">
+        <div class="sh">
+            <div class="sh-num sh-num-ok">5</div>
+            <div>
+                <div id="sec5Title" class="sh-title">Keenetic / Netcraze - отправка на роутер</div>
+                <div id="sec5Desc" class="sh-desc">Авторизация через RCI API и прямое выполнение команды</div>
+            </div>
+            <div class="conn-wrap">
+                <div id="connBadge" class="conn-badge">
+                    <div id="connDot" class="conn-dot"></div>
+                    <span id="connLabel">Не подключено</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Credentials -->
+        <div class="grid g3">
+            <label class="field"><span id="lblRouterIp">IP роутера</span>
+                <input id="rtrIp" type="text" placeholder="192.168.1.1"/>
+            </label>
+            <label class="field"><span id="lblRouterLogin">Логин</span>
+                <input id="rtrLogin" type="text" placeholder="admin" autocomplete="username"/>
+            </label>
+            <label class="field"><span id="lblRouterPass">Пароль</span>
+                <input id="rtrPass" type="password" placeholder="••••••••" autocomplete="current-password"/>
+            </label>
+        </div>
+
+        <div class="row row-mt-12">
+            <button id="btnConnect" type="button" class="sec">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                    <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                    <circle cx="12" cy="20" r="1"/>
+                </svg>
+                <span id="btnConnectText">Подключиться</span>
+            </button>
+            <button id="btnGetIfaces" type="button" class="sec" disabled>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <rect x="2" y="3" width="20" height="14" rx="2"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                <span id="btnGetIfacesText">Получить интерфейсы</span>
+            </button>
+            <button id="btnSend" type="button" class="ok-btn" disabled>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <line x1="22" y1="2" x2="11" y2="13"/>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+                <span id="btnSendText">Отправить команду на роутер</span>
+            </button>
+        </div>
+
+        <!-- Interface list -->
+        <div id="ifaceSection" class="hidden">
+            <div class="div"></div>
+            <div class="st st-mb-8">
+                <span id="ifaceHintText">Нажмите на интерфейс - имя подставится в поле выше ↑</span>
+            </div>
+            <div id="ifaceGrid" class="iface-grid"></div>
+        </div>
+
+        <!-- API response -->
+        <div id="apiBox" class="api-box"></div>
+    </section>
+
+    <div class="footer-note">
+        © 2026 AWG Command Builder · Developer: <a id="devLink" href="https://github.com/BespredeL" target="_blank" class="dev-link">BespredeL</a>
+    </div>
+</main>
+
+<script>
+    /**
+     * Utilities
+     */
+    const $ = id => document.getElementById(id);
+    const qs = s => document.querySelector(s);
+    const on = (id, event, handler) => {
+        const el = $(id);
+        if (el) el.addEventListener(event, handler);
+    };
+    const LANG_LS = 'acb_lang';
+    let i18nConfig = null;
+    let currentLang = 'ru';
+
+    function textOf(key, fallback = '') {
+        const pack = i18nConfig?.languages?.[currentLang]?.text || {};
+        return pack[key] ?? fallback;
+    }
+
+    function applyLanguage(lang) {
+        if (!i18nConfig?.languages?.[lang]) return;
+        currentLang = lang;
+        localStorage.setItem(LANG_LS, lang);
+
+        const ids = Object.keys(i18nConfig.languages[lang].text || {});
+        ids.forEach(id => {
+            const el = $(id);
+            if (!el) return;
+            if (id === 'parseStatus' && el.dataset.userSet === '1') return;
+            el.textContent = textOf(id, el.textContent);
+        });
+        setConn(_authed ? 'connected' : 'off');
+    }
+
+    function initLanguageSelector() {
+        const sel = $('langSelect');
+        if (!sel || !i18nConfig?.languages) return;
+        const names = i18nConfig.languageNames || {};
+        sel.innerHTML = '';
+        Object.keys(i18nConfig.languages).forEach(code => {
+            const o = document.createElement('option');
+            o.value = code;
+            o.textContent = names[code] || code;
+            sel.appendChild(o);
+        });
+
+        const preferred = localStorage.getItem(LANG_LS) || i18nConfig.defaultLanguage || 'ru';
+        sel.value = i18nConfig.languages[preferred] ? preferred : (i18nConfig.defaultLanguage || 'ru');
+        applyLanguage(sel.value);
+    }
+
+    async function loadI18N() {
+        try {
+            const r = await fetch(`${LOCAL_API}/i18n`, {cache: 'no-store'});
+            if (!r.ok) return;
+            i18nConfig = await r.json();
+            initLanguageSelector();
+        } catch {
+            // If i18n load fails we keep hardcoded UI text.
+        }
+    }
+
+    function toast(msg, type = 'info', ms = 3200) {
+        const el = document.createElement('div');
+        el.className = `toast toast-${type}`;
+        el.textContent = msg;
+        $('toasts').appendChild(el);
+        setTimeout(() => {
+            el.style.opacity = '0';
+            el.style.transition = 'opacity .25s';
+            setTimeout(() => el.remove(), 260);
+        }, ms);
+    }
+
+    function setLoading(btn, on) {
+        if (on) {
+            btn._orig = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spin"></div> Загрузка...';
+        } else {
+            if (btn._orig) btn.innerHTML = btn._orig;
+            btn.disabled = false;
+        }
+    }
+
+    /**
+     * MD5 (compact, self-contained)
+     */
+    const md5 = (() => {
+        function add32(a, b) {
+            return (a + b) & 0xFFFFFFFF;
+        }
+
+        function cmn(q, a, b, x, s, t) {
+            a = add32(add32(a, q), add32(x, t));
+            return add32(a << s | a >>> (32 - s), b);
+        }
+
+        const ff = (a, b, c, d, x, s, t) => cmn(b & c | ~b & d, a, b, x, s, t);
+        const gg = (a, b, c, d, x, s, t) => cmn(b & d | c & ~d, a, b, x, s, t);
+        const hh = (a, b, c, d, x, s, t) => cmn(b ^ c ^ d, a, b, x, s, t);
+        const ii = (a, b, c, d, x, s, t) => cmn(c ^ (b | ~d), a, b, x, s, t);
+
+        function cycle(x, k) {
+            let [a, b, c, d] = [x[0], x[1], x[2], x[3]];
+            a = ff(a, b, c, d, k[0], 7, -680876936);
+            d = ff(d, a, b, c, k[1], 12, -389564586);
+            c = ff(c, d, a, b, k[2], 17, 606105819);
+            b = ff(b, c, d, a, k[3], 22, -1044525330);
+            a = ff(a, b, c, d, k[4], 7, -176418897);
+            d = ff(d, a, b, c, k[5], 12, 1200080426);
+            c = ff(c, d, a, b, k[6], 17, -1473231341);
+            b = ff(b, c, d, a, k[7], 22, -45705983);
+            a = ff(a, b, c, d, k[8], 7, 1770035416);
+            d = ff(d, a, b, c, k[9], 12, -1958414417);
+            c = ff(c, d, a, b, k[10], 17, -42063);
+            b = ff(b, c, d, a, k[11], 22, -1990404162);
+            a = ff(a, b, c, d, k[12], 7, 1804603682);
+            d = ff(d, a, b, c, k[13], 12, -40341101);
+            c = ff(c, d, a, b, k[14], 17, -1502002290);
+            b = ff(b, c, d, a, k[15], 22, 1236535329);
+            a = gg(a, b, c, d, k[1], 5, -165796510);
+            d = gg(d, a, b, c, k[6], 9, -1069501632);
+            c = gg(c, d, a, b, k[11], 14, 643717713);
+            b = gg(b, c, d, a, k[0], 20, -373897302);
+            a = gg(a, b, c, d, k[5], 5, -701558691);
+            d = gg(d, a, b, c, k[10], 9, 38016083);
+            c = gg(c, d, a, b, k[15], 14, -660478335);
+            b = gg(b, c, d, a, k[4], 20, -405537848);
+            a = gg(a, b, c, d, k[9], 5, 568446438);
+            d = gg(d, a, b, c, k[14], 9, -1019803690);
+            c = gg(c, d, a, b, k[3], 14, -187363961);
+            b = gg(b, c, d, a, k[8], 20, 1163531501);
+            a = gg(a, b, c, d, k[13], 5, -1444681467);
+            d = gg(d, a, b, c, k[2], 9, -51403784);
+            c = gg(c, d, a, b, k[7], 14, 1735328473);
+            b = gg(b, c, d, a, k[12], 20, -1926607734);
+            a = hh(a, b, c, d, k[5], 4, -378558);
+            d = hh(d, a, b, c, k[8], 11, -2022574463);
+            c = hh(c, d, a, b, k[11], 16, 1839030562);
+            b = hh(b, c, d, a, k[14], 23, -35309556);
+            a = hh(a, b, c, d, k[1], 4, -1530992060);
+            d = hh(d, a, b, c, k[4], 11, 1272893353);
+            c = hh(c, d, a, b, k[7], 16, -155497632);
+            b = hh(b, c, d, a, k[10], 23, -1094730640);
+            a = hh(a, b, c, d, k[13], 4, 681279174);
+            d = hh(d, a, b, c, k[0], 11, -358537222);
+            c = hh(c, d, a, b, k[3], 16, -722521979);
+            b = hh(b, c, d, a, k[6], 23, 76029189);
+            a = hh(a, b, c, d, k[9], 4, -640364487);
+            d = hh(d, a, b, c, k[12], 11, -421815835);
+            c = hh(c, d, a, b, k[15], 16, 530742520);
+            b = hh(b, c, d, a, k[2], 23, -995338651);
+            a = ii(a, b, c, d, k[0], 6, -198630844);
+            d = ii(d, a, b, c, k[7], 10, 1126891415);
+            c = ii(c, d, a, b, k[14], 15, -1416354905);
+            b = ii(b, c, d, a, k[5], 21, -57434055);
+            a = ii(a, b, c, d, k[12], 6, 1700485571);
+            d = ii(d, a, b, c, k[3], 10, -1894986606);
+            c = ii(c, d, a, b, k[10], 15, -1051523);
+            b = ii(b, c, d, a, k[1], 21, -2054922799);
+            a = ii(a, b, c, d, k[8], 6, 1873313359);
+            d = ii(d, a, b, c, k[15], 10, -30611744);
+            c = ii(c, d, a, b, k[6], 15, -1560198380);
+            b = ii(b, c, d, a, k[13], 21, 1309151649);
+            a = ii(a, b, c, d, k[4], 6, -145523070);
+            d = ii(d, a, b, c, k[11], 10, -1120210379);
+            c = ii(c, d, a, b, k[2], 15, 718787259);
+            b = ii(b, c, d, a, k[9], 21, -343485551);
+            x[0] = add32(a, x[0]);
+            x[1] = add32(b, x[1]);
+            x[2] = add32(c, x[2]);
+            x[3] = add32(d, x[3]);
+        }
+
+        function blk(s) {
+            const b = [];
+            for (let i = 0; i < 64; i += 4) b[i >> 2] = s.charCodeAt(i) + (s.charCodeAt(i + 1) << 8) + (s.charCodeAt(i + 2) << 16) + (s.charCodeAt(i + 3) << 24);
+            return b;
+        }
+
+        function compute(s) {
+            const n = s.length, st = [1732584193, -271733879, -1732584194, 271733878];
+            let i;
+            for (i = 64; i <= n; i += 64) cycle(st, blk(s.slice(i - 64, i)));
+            s = s.slice(i - 64);
+            const tail = new Array(16).fill(0);
+            for (i = 0; i < s.length; i++) tail[i >> 2] |= s.charCodeAt(i) << (i % 4 * 8);
+            tail[i >> 2] |= 0x80 << (i % 4 * 8);
+            if (i > 55) {
+                cycle(st, tail);
+                tail.fill(0);
+            }
+            tail[14] = n * 8;
+            cycle(st, tail);
+            return st;
+        }
+
+        function hex(n) {
+            let s = '', j = 0;
+            for (; j < 4; j++) s += ('0' + ((n >> (j * 8 + 4)) & 0xf).toString(16)) + ('0' + ((n >> (j * 8)) & 0xf).toString(16));
+            return s;
+        }
+
+        return str => compute(unescape(encodeURIComponent(str))).map(hex).join('');
+    })();
+
+    /**
+     * localStorage
+     */
+    const LS = 'acb_v2';
+
+    function saveRtrSettings() {
+        localStorage.setItem(LS, JSON.stringify({
+            ip: $('rtrIp').value.trim(),
+            login: $('rtrLogin').value.trim()
+        }));
+    }
+
+    (function loadRtrSettings() {
+        try {
+            const d = JSON.parse(localStorage.getItem(LS) || '{}');
+            if (d.ip) $('rtrIp').value = d.ip;
+            if (d.login) $('rtrLogin').value = d.login;
+        } catch {
+        }
+    })();
+
+    /**
+     * Config parsing
+     */
+    const intKeys = ['jc', 'jmin', 'jmax', 's1', 's2', 'h1', 'h2', 'h3', 'h4', 's3', 's4'];
+    const iKeys = ['i1', 'i2', 'i3', 'i4', 'i5'];
+
+    function parseConfig(text) {
+        const out = {};
+        for (const m of text.matchAll(/^\s*([A-Za-z0-9_]+)\s*=\s*(.+?)\s*$/gm))
+            out[m[1].toLowerCase()] = m[2].trim();
+        return out;
+    }
+
+    function fillFromConfig(obj) {
+        intKeys.forEach(k => {
+            if (obj[k] !== undefined) {
+                const n = parseInt(obj[k], 10);
+                if (!isNaN(n)) $(k).value = String(n);
+            }
+        });
+        iKeys.forEach(k => {
+            if (obj[k] !== undefined) $(k).value = obj[k];
+        });
+        if (iKeys.some(k => obj[k])) $('useExtended').checked = true;
+    }
+
+    function applyConfig(text, filename) {
+        const parsed = parseConfig(text);
+        fillFromConfig(parsed);
+        const st = $('parseStatus');
+        st.textContent = `✓ ${filename}`;
+        st.className = 'st ok';
+        st.dataset.userSet = '1';
+        toast(`Конфиг «${filename}» загружен`, 'ok');
+    }
+
+    /**
+     * Command builder
+     */
+    function q(v) {
+        return `"${String(v).replaceAll('"', '\\"')}"`;
+    }
+
+    function buildCommand() {
+        const ifName = $('ifName').value.trim();
+        if (!ifName) throw new Error('Укажите имя интерфейса');
+        const base = intKeys.slice(0, 9).map(k => Number($(k).value || 0));
+        let cmd = `interface ${ifName} wireguard asc ${base.join(' ')}`;
+        if ($('useExtended').checked) {
+            const s3 = Number($('s3').value || 0);
+            const s4 = Number($('s4').value || 0);
+            const iVals = iKeys.map(k => $(k).value.trim());
+            if (iVals.some(v => !v)) throw new Error('Заполните i1..i5 или снимите флаг «использовать i1..i5»');
+            cmd += ` ${s3} ${s4} ${iVals.map(q).join(' ')}`;
+        }
+        const mode = $('mode').value;
+        if (mode === 'create')
+            return `interface ${ifName} wireguard\n${cmd}`;
+        return cmd;
+    }
+
+    /**
+     * I-list
+     */
+    let iListCycles = new Map();
+
+    function loadFromPackets(packets) {
+        iListCycles = new Map();
+        for (const [k, v] of Object.entries(packets)) {
+            const m = /^I([1-5])_c(\d+)$/i.exec(k);
+            if (!m) continue;
+            const [, slot, c] = [m[0], +m[1], +m[2]];
+            if (!iListCycles.has(c)) iListCycles.set(c, {});
+            iListCycles.get(c)[+m[1]] = v;
+        }
+        const sel = $('cycleSelect');
+        sel.innerHTML = '<option value="">- вручную -</option>';
+        [...iListCycles.keys()].sort((a, b) => a - b).forEach(c => {
+            const d = iListCycles.get(c);
+            if ([1, 2, 3, 4, 5].every(i => d[i])) {
+                const o = document.createElement('option');
+                o.value = String(c);
+                o.textContent = `c${c}`;
+                sel.appendChild(o);
+            }
+        });
+        const cnt = sel.options.length - 1;
+        $('ilistHint').textContent = `Загружено циклов: ${cnt}`;
+        toast(`I-list: ${cnt} циклов загружено`, 'ok');
+    }
+
+    function parseIList(text) {
+        const data = JSON.parse(text);
+        loadFromPackets(data.packets || {});
+    }
+
+    /**
+     * Keenetic RCI API
+     */
+    let _base = '';
+    let _authed = false;
+    const LOCAL_API = 'http://127.0.0.1:18080/api';
+
+    function setConn(state) {
+        const dot = $('connDot'), lbl = $('connLabel');
+        dot.className = 'conn-dot';
+        const map = {
+            off: ['', textOf('connOffLabel', 'Не подключено')],
+            loading: ['blink', textOf('connLoadingLabel', 'Подключение…')],
+            connected: ['on', textOf('connConnectedLabel', 'Подключено')],
+            error: ['err', textOf('connErrorLabel', 'Ошибка')],
+        };
+        const [cls, txt] = map[state] || map.off;
+        if (cls) dot.classList.add(cls);
+        lbl.textContent = txt;
+        const canUse = state === 'connected';
+        $('btnGetIfaces').disabled = !canUse;
+        $('btnSend').disabled = !canUse;
+    }
+
+    function baseUrl() {
+        let ip = $('rtrIp').value.trim();
+        if (!ip) return null;
+        if (!/^https?:\/\//i.test(ip)) ip = `http://${ip}`;
+        return ip.replace(/\/$/, '');
+    }
+
+    function showApiBox(text, ok) {
+        const el = $('apiBox');
+        el.textContent = text;
+        el.className = `api-box show ${ok ? 'ok-resp' : 'err-resp'}`;
+    }
+
+    function rebuildResultIfExists() {
+        const resultEl = $('result');
+        if (!resultEl) return;
+        if (!resultEl.textContent.trim()) return;
+        try {
+            resultEl.textContent = buildCommand();
+        } catch {
+            // Keep previous output if current fields are incomplete.
+        }
+    }
+
+    async function doConnect() {
+        const base = baseUrl();
+        const login = $('rtrLogin').value.trim();
+        const pass = $('rtrPass').value;
+
+        if (!base) {
+            toast('Укажите IP роутера', 'err');
+            return;
+        }
+        if (!login) {
+            toast('Укажите логин', 'err');
+            return;
+        }
+        if (!pass) {
+            toast('Укажите пароль', 'err');
+            return;
+        }
+
+        saveRtrSettings();
+        setConn('loading');
+        setLoading($('btnConnect'), true);
+
+        try {
+            const r = await fetch(`${LOCAL_API}/connect`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({base, login, password: pass})
+            });
+
+            if (r.ok) {
+                const data = await r.json();
+                _base = data.base || base;
+                _authed = true;
+                setConn('connected');
+                showApiBox(JSON.stringify(data, null, 2), true);
+                toast('Авторизован на роутере', 'ok');
+            } else {
+                const body = await r.text().catch(() => '');
+                throw new Error(`HTTP ${r.status} - ${body.slice(0, 220)}`);
+            }
+        } catch (e) {
+            _authed = false;
+            setConn('error');
+            showApiBox('Ошибка авторизации:\n' + e.message, false);
+            toast('Ошибка: ' + e.message, 'err', 6000);
+        } finally {
+            setLoading($('btnConnect'), false);
+        }
+    }
+
+    async function doGetInterfaces() {
+        if (!_authed) {
+            toast('Сначала авторизуйтесь', 'err');
+            return;
+        }
+        const btn = $('btnGetIfaces');
+        setLoading(btn, true);
+        try {
+            // Through the local backend: GET /api/interfaces
+            const r = await fetch(`${LOCAL_API}/interfaces`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const data = await r.json();
+
+            // Keenetic returns an object of the { interface: { "GigabitEthernet0": {...}, ... } }
+            const ifMap = data.interface ?? data ?? {};
+            const names = Object.keys(ifMap);
+            if (!names.length) throw new Error('Список интерфейсов пуст - возможно неверный ответ API');
+
+            renderIfaces(names, ifMap);
+            showApiBox(JSON.stringify(data, null, 2), true);
+            toast(`Получено интерфейсов: ${names.length}`, 'ok');
+        } catch (e) {
+            showApiBox('Ошибка:\n' + e.message, false);
+            toast('Ошибка: ' + e.message, 'err', 5000);
+        } finally {
+            setLoading(btn, false);
+        }
+    }
+
+    function renderIfaces(names, ifMap) {
+        const grid = $('ifaceGrid');
+        grid.innerHTML = '';
+        let shown = 0;
+
+        names.forEach(name => {
+            const type = String(ifMap[name]?.type ?? '').toLowerCase();
+            const desc = ifMap[name]?.description ?? '';
+            const isWg = type.includes('wireguard') || type.includes('wg')
+                || name.toLowerCase().includes('wireguard');
+            if (!isWg) return;
+
+            const chip = document.createElement('div');
+            chip.className = 'iface-chip' + (isWg ? ' wg' : '');
+            chip.title = [type, desc].filter(Boolean).join(' · ') || name;
+
+            // icon
+            const icon = isWg ? '🔒' : '🖧';
+            chip.innerHTML = `<span class="iface-icon">${icon}</span> ${name} (${desc})`;
+
+            chip.addEventListener('click', () => {
+                $('ifName').value = name;
+                grid.querySelectorAll('.iface-chip').forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                rebuildResultIfExists();
+                toast(`Выбран интерфейс: ${name}`, 'info');
+            });
+
+            grid.appendChild(chip);
+            shown += 1;
+        });
+
+        if (!shown) {
+            throw new Error('WireGuard интерфейсы не найдены');
+        }
+
+        $('ifaceSection').style.display = 'block';
+    }
+
+    async function doSendCommand() {
+        if (!_authed) {
+            toast('Сначала авторизуйтесь', 'err');
+            return;
+        }
+        const cmd = $('result').textContent.trim();
+        if (!cmd) {
+            toast('Сначала сформируйте команду (шаг 4)', 'err');
+            return;
+        }
+
+        const btn = $('btnSend');
+        setLoading(btn, true);
+        try {
+            const r = await fetch(`${LOCAL_API}/command`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({command: cmd})
+            });
+            const raw = await r.text();
+            let pretty = raw;
+            try {
+                pretty = JSON.stringify(JSON.parse(raw), null, 2);
+            } catch {
+            }
+
+            showApiBox(pretty, r.ok);
+            if (r.ok) {
+                toast('Команда успешно отправлена на роутер ✓', 'ok', 5000);
+            } else {
+                toast(`Ошибка выполнения: HTTP ${r.status}`, 'err', 6000);
+            }
+        } catch (e) {
+            showApiBox('Ошибка отправки:\n' + e.message, false);
+            toast('Ошибка: ' + e.message, 'err', 6000);
+        } finally {
+            setLoading(btn, false);
+        }
+    }
+
+    /**
+     * Event bindings
+     */
+    // Optional notice dismiss (if banner exists)
+    on('corsClose', 'click', () => {
+        const warn = $('corsWarn');
+        if (warn) warn.style.display = 'none';
+    });
+
+    // Config - Auto-parsing when selecting a file
+    on('cfgFile', 'change', async () => {
+        const f = $('cfgFile').files[0];
+        if (f) applyConfig(await f.text(), f.name);
+    });
+
+    on('btnLoadCfg', 'click', async () => {
+        const f = $('cfgFile').files[0];
+        if (!f) {
+            toast('Выберите .conf файл', 'err');
+            return;
+        }
+        applyConfig(await f.text(), f.name);
+    });
+
+    // I-list
+    on('ilistFile', 'change', async () => {
+        const f = $('ilistFile').files[0];
+        if (!f) return;
+        try {
+            parseIList(await f.text());
+        } catch (e) {
+            toast('Ошибка парсинга I-list: ' + e.message, 'err');
+        }
+    });
+
+    on('btnLoadIList', 'click', async () => {
+        const f = $('ilistFile').files[0];
+        if (!f) {
+            toast('Выберите JSON файл', 'err');
+            return;
+        }
+        try {
+            parseIList(await f.text());
+        } catch (e) {
+            toast('Ошибка: ' + e.message, 'err');
+        }
+    });
+
+    on('btnLoadIListUrl', 'click', async () => {
+        const url = $('ilistUrl').value.trim();
+        if (!url) {
+            toast('Укажите URL', 'err');
+            return;
+        }
+        const btn = $('btnLoadIListUrl');
+        setLoading(btn, true);
+        try {
+            const r = await fetch(url, {cache: 'no-store'});
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            parseIList(await r.text());
+        } catch (e) {
+            toast('Ошибка загрузки: ' + e.message, 'err');
+        } finally {
+            setLoading(btn, false);
+        }
+    });
+
+    on('cycleSelect', 'change', () => {
+        const c = Number($('cycleSelect').value);
+        if (!c) return;
+        const d = iListCycles.get(c);
+        if (!d) return;
+        [1, 2, 3, 4, 5].forEach(i => $(`i${i}`).value = d[i] ?? '');
+        $('useExtended').checked = true;
+    });
+
+    on('btnRandomCycle', 'click', () => {
+        const opts = [...$('cycleSelect').options].filter(o => o.value);
+        if (!opts.length) {
+            toast('Загрузите I-list', 'err');
+            return;
+        }
+        const o = opts[Math.floor(Math.random() * opts.length)];
+        $('cycleSelect').value = o.value;
+        $('cycleSelect').dispatchEvent(new Event('change'));
+        toast(`Случайный цикл: c${o.value}`, 'info');
+    });
+
+    // Build command
+    on('btnBuild', 'click', () => {
+        try {
+            $('result').textContent = buildCommand();
+            toast('Команда сформирована', 'ok');
+        } catch (e) {
+            $('result').textContent = '';
+            toast(e.message, 'err');
+        }
+    });
+
+    // Copy
+    on('btnCopy', 'click', async () => {
+        const txt = $('result').textContent.trim();
+        if (!txt) {
+            toast('Сначала сформируйте команду', 'err');
+            return;
+        }
+        await navigator.clipboard.writeText(txt);
+        toast('Скопировано в буфер обмена', 'ok');
+    });
+
+    // Keenetic
+    on('btnConnect', 'click', doConnect);
+    on('btnGetIfaces', 'click', doGetInterfaces);
+    on('btnSend', 'click', doSendCommand);
+    on('langSelect', 'change', e => applyLanguage(e.target.value));
+    on('devLink', 'click', async e => {
+        e.preventDefault();
+        const link = e.currentTarget?.href;
+        if (!link) return;
+        try {
+            const r = await fetch(`${LOCAL_API}/open-external?url=${encodeURIComponent(link)}`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        } catch (err) {
+            toast('Не удалось открыть ссылку во внешнем браузере', 'err');
+        }
+    });
+    on('btnExportLang', 'click', () => {
+        window.location.href = `${LOCAL_API}/i18n/export-exe`;
+    });
+    loadI18N();
+
+    // Ctrl+Enter = сформировать команду
+    document.addEventListener('keydown', e => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            $('btnBuild').click();
+        }
+    });
+</script>
+</body>
+</html>

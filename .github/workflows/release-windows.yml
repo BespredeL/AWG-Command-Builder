@@ -1,0 +1,35 @@
+name: Release Windows EXE
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build GUI executable
+        shell: pwsh
+        run: |
+          go version
+          go build -ldflags="-H=windowsgui" -o "AWG-Command-Builder.exe" .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AWG-Command-Builder.exe
+          generate_release_notes: true

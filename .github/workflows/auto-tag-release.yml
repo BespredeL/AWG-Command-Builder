@@ -1,0 +1,71 @@
+name: Auto Tag and Release
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tag_and_release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next tag
+        id: next_tag
+        shell: pwsh
+        run: |
+          git fetch --tags --force
+
+          $latest = git tag --list "v*" --sort=-v:refname | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($latest)) {
+            $next = "v0.1.0"
+          } elseif ($latest -match '^v(\d+)\.(\d+)\.(\d+)$') {
+            $major = [int]$Matches[1]
+            $minor = [int]$Matches[2]
+            $patch = [int]$Matches[3] + 1
+            $next = "v$major.$minor.$patch"
+          } else {
+            throw "Latest tag '$latest' is not semver-like (expected vX.Y.Z)."
+          }
+
+          "latest=$latest" >> $env:GITHUB_OUTPUT
+          "tag=$next" >> $env:GITHUB_OUTPUT
+          Write-Host "Latest tag: $latest"
+          Write-Host "Next tag: $next"
+
+      - name: Create and push tag
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.next_tag.outputs.tag }}"
+          git tag $tag
+          git push origin $tag
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build GUI executable
+        shell: pwsh
+        run: |
+          go version
+          go build -ldflags="-H=windowsgui" -o "AWG-Command-Builder.exe" .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.next_tag.outputs.tag }}
+          files: AWG-Command-Builder.exe
+          generate_release_notes: true
