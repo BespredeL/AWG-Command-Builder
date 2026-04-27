@@ -620,6 +620,12 @@
             display: none;
         }
 
+        .mode-create-box {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--line);
+        }
+
         .st-mb-8 {
             margin-bottom: 8px;
         }
@@ -716,6 +722,35 @@
                 <span id="btnLoadCfgText">Загрузить конфиг</span>
             </button>
             <span id="parseStatus" class="st">Выберите .conf файл</span>
+        </div>
+
+        <div id="createModeBox" class="mode-create-box hidden">
+            <div class="grid g3">
+                <label class="field"><span>WireGuard профиль</span>
+                    <select id="wgInputMode">
+                        <option value="manual" selected>Ручной ввод</option>
+                        <option value="file">Загрузить из .conf</option>
+                    </select>
+                </label>
+                <div id="wgFileHint" class="st row-align-self-end hidden">
+                    Используется файл из поля «Конфиг AWG (.conf / .txt)» выше
+                </div>
+            </div>
+
+            <div id="wgCreateStatus" class="st st-mt-6">Заполните параметры подключения или загрузите .conf</div>
+
+            <div class="grid g3 grid-mt-12">
+                <label class="field"><span>Address</span><input id="wgAddress" type="text" placeholder="10.0.0.2/32, fd00::2/128"/></label>
+                <label class="field"><span>PrivateKey</span><input id="wgPrivateKey" type="text" placeholder="base64-private-key"/></label>
+                <label class="field"><span>ListenPort</span><input id="wgListenPort" type="number" min="1" max="65535" placeholder="51820"/></label>
+                <label class="field"><span>MTU</span><input id="wgMtu" type="number" min="576" max="9000" placeholder="1420"/></label>
+                <label class="field"><span>Peer PublicKey</span><input id="wgPeerPublicKey" type="text" placeholder="base64-public-key"/></label>
+                <label class="field"><span>PresharedKey</span><input id="wgPresharedKey" type="text" placeholder="optional"/></label>
+                <label class="field"><span>Endpoint</span><input id="wgEndpoint" type="text" placeholder="1.2.3.4:51820"/></label>
+                <label class="field"><span>AllowedIPs</span><input id="wgAllowedIps" type="text" placeholder="0.0.0.0/0, ::/0"/></label>
+                <label class="field"><span>DNS</span><input id="wgDns" type="text" placeholder="1.1.1.1, 8.8.8.8"/></label>
+                <label class="field"><span>PersistentKeepalive</span><input id="wgKeepalive" type="number" min="0" max="65535" placeholder="25"/></label>
+            </div>
         </div>
     </section>
 
@@ -842,6 +877,12 @@
             </label>
             <label class="field"><span id="lblRouterPass">Пароль</span>
                 <input id="rtrPass" type="password" placeholder="••••••••" autocomplete="current-password"/>
+            </label>
+        </div>
+        <div class="row row-mt-10">
+            <label class="chip" title="Отключает TLS-проверку сертификата. Используйте только для локального роутера с self-signed сертификатом.">
+                <input id="tlsInsecure" type="checkbox">
+                <span>Разрешить self-signed TLS (небезопасно)</span>
             </label>
         </div>
 
@@ -1105,7 +1146,8 @@
     function saveRtrSettings() {
         localStorage.setItem(LS, JSON.stringify({
             ip: $('rtrIp').value.trim(),
-            login: $('rtrLogin').value.trim()
+            login: $('rtrLogin').value.trim(),
+            tlsInsecure: $('tlsInsecure').checked
         }));
     }
 
@@ -1114,6 +1156,7 @@
             const d = JSON.parse(localStorage.getItem(LS) || '{}');
             if (d.ip) $('rtrIp').value = d.ip;
             if (d.login) $('rtrLogin').value = d.login;
+            if (typeof d.tlsInsecure === 'boolean') $('tlsInsecure').checked = d.tlsInsecure;
         } catch {
         }
     })();
@@ -1123,6 +1166,10 @@
      */
     const intKeys = ['jc', 'jmin', 'jmax', 's1', 's2', 'h1', 'h2', 'h3', 'h4', 's3', 's4'];
     const iKeys = ['i1', 'i2', 'i3', 'i4', 'i5'];
+    const wgFieldIds = [
+        'wgAddress', 'wgPrivateKey', 'wgListenPort', 'wgMtu', 'wgPeerPublicKey',
+        'wgPresharedKey', 'wgEndpoint', 'wgAllowedIps', 'wgDns', 'wgKeepalive'
+    ];
 
     function parseConfig(text) {
         const out = {};
@@ -1144,6 +1191,57 @@
         if (iKeys.some(k => obj[k])) $('useExtended').checked = true;
     }
 
+    function parseWgConf(text) {
+        const lines = text.split(/\r?\n/);
+        const out = {interface: {}, peer: {}};
+        let section = '';
+
+        for (const raw of lines) {
+            const line = raw.trim();
+            if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+            const sec = line.match(/^\[(.+)]$/);
+            if (sec) {
+                section = sec[1].toLowerCase();
+                continue;
+            }
+            const eq = line.indexOf('=');
+            if (eq <= 0) continue;
+            const key = line.slice(0, eq).trim().toLowerCase();
+            const value = line.slice(eq + 1).trim();
+            if (section === 'interface') out.interface[key] = value;
+            if (section === 'peer') out.peer[key] = value;
+        }
+        return out;
+    }
+
+    function fillWgFields(profile) {
+        const iface = profile.interface || {};
+        const peer = profile.peer || {};
+
+        $('wgAddress').value = iface.address || $('wgAddress').value;
+        $('wgPrivateKey').value = iface.privatekey || $('wgPrivateKey').value;
+        $('wgListenPort').value = iface.listenport || $('wgListenPort').value;
+        $('wgMtu').value = iface.mtu || $('wgMtu').value;
+
+        $('wgPeerPublicKey').value = peer.publickey || $('wgPeerPublicKey').value;
+        $('wgPresharedKey').value = peer.presharedkey || $('wgPresharedKey').value;
+        $('wgEndpoint').value = peer.endpoint || $('wgEndpoint').value;
+        $('wgAllowedIps').value = peer.allowedips || $('wgAllowedIps').value;
+        $('wgDns').value = iface.dns || $('wgDns').value;
+        $('wgKeepalive').value = peer.persistentkeepalive || $('wgKeepalive').value;
+    }
+
+    function setCreateModeVisibility() {
+        const isCreate = $('mode').value === 'create';
+        $('createModeBox').classList.toggle('hidden', !isCreate);
+        rebuildResultIfExists();
+    }
+
+    function setWgInputModeVisibility() {
+        const useFile = $('wgInputMode').value === 'file';
+        $('wgFileHint').classList.toggle('hidden', !useFile);
+    }
+
     function applyConfig(text, filename) {
         const parsed = parseConfig(text);
         fillFromConfig(parsed);
@@ -1161,7 +1259,15 @@
         return `"${String(v).replaceAll('"', '\\"')}"`;
     }
 
-    function buildCommand() {
+    function sanitizeEndpoint(v) {
+        return v.trim().replace(/^https?:\/\//i, '');
+    }
+
+    function splitCsv(v) {
+        return String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+    }
+
+    function buildAscCommand() {
         const ifName = $('ifName').value.trim();
         if (!ifName) throw new Error('Укажите имя интерфейса');
         const base = intKeys.slice(0, 9).map(k => Number($(k).value || 0));
@@ -1173,10 +1279,61 @@
             if (iVals.some(v => !v)) throw new Error('Заполните i1..i5 или снимите флаг «использовать i1..i5»');
             cmd += ` ${s3} ${s4} ${iVals.map(q).join(' ')}`;
         }
-        const mode = $('mode').value;
-        if (mode === 'create')
-            return `interface ${ifName} wireguard\n${cmd}`;
         return cmd;
+    }
+
+    function buildCommand() {
+        const ifName = $('ifName').value.trim();
+        if (!ifName) throw new Error('Укажите имя интерфейса');
+        const cmd = buildAscCommand();
+        const mode = $('mode').value;
+        if (mode === 'create') {
+            const address = $('wgAddress').value.trim();
+            const privateKey = $('wgPrivateKey').value.trim();
+            const peerPub = $('wgPeerPublicKey').value.trim();
+            const endpoint = sanitizeEndpoint($('wgEndpoint').value);
+            const allowedIps = $('wgAllowedIps').value.trim();
+            const dns = $('wgDns').value.trim();
+            const listenPort = $('wgListenPort').value.trim();
+            const mtu = $('wgMtu').value.trim();
+            const preshared = $('wgPresharedKey').value.trim();
+            const keepalive = $('wgKeepalive').value.trim();
+
+            if (!address || !privateKey || !peerPub || !endpoint || !allowedIps) {
+                throw new Error('Для режима create заполните Address, PrivateKey, Peer PublicKey, Endpoint и AllowedIPs');
+            }
+
+            const lines = [`interface ${ifName} wireguard`];
+
+            lines.push(`interface ${ifName} wireguard private-key ${q(privateKey)}`);
+            address.split(',').map(v => v.trim()).filter(Boolean).forEach(v => lines.push(`interface ${ifName} wireguard address ${v}`));
+            dns.split(',').map(v => v.trim()).filter(Boolean).forEach(v => lines.push(`interface ${ifName} wireguard dns ${v}`));
+            if (listenPort) lines.push(`interface ${ifName} wireguard listen-port ${Number(listenPort) || 0}`);
+            if (mtu) lines.push(`interface ${ifName} wireguard mtu ${Number(mtu) || 0}`);
+
+            let peerLine = `interface ${ifName} wireguard peer ${q(peerPub)} endpoint ${endpoint} allowed-ips ${allowedIps}`;
+            if (preshared) peerLine += ` preshared-key ${q(preshared)}`;
+            if (keepalive) peerLine += ` persistent-keepalive ${Number(keepalive) || 0}`;
+            lines.push(peerLine);
+            lines.push(cmd);
+            return lines.join('\n');
+        }
+        return cmd;
+    }
+
+    async function applyWgFromSelectedFile() {
+        if ($('mode').value !== 'create' || $('wgInputMode').value !== 'file') return;
+        const f = $('cfgFile').files[0];
+        if (!f) {
+            $('wgCreateStatus').textContent = 'Выберите .conf файл в поле «Конфиг AWG (.conf / .txt)»';
+            $('wgCreateStatus').className = 'st st-mt-6';
+            return;
+        }
+        const parsed = parseWgConf(await f.text());
+        fillWgFields(parsed);
+        $('wgCreateStatus').textContent = `✓ WireGuard профиль загружен из ${f.name}`;
+        $('wgCreateStatus').className = 'st ok st-mt-6';
+        rebuildResultIfExists();
     }
 
     /**
@@ -1266,6 +1423,7 @@
         const base = baseUrl();
         const login = $('rtrLogin').value.trim();
         const pass = $('rtrPass').value;
+        const insecureTls = $('tlsInsecure').checked;
 
         if (!base) {
             toast('Укажите IP роутера', 'err');
@@ -1288,7 +1446,7 @@
             const r = await fetch(`${LOCAL_API}/connect`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({base, login, password: pass})
+                body: JSON.stringify({base, login, password: pass, insecureTls})
             });
 
             if (r.ok) {
@@ -1390,15 +1548,57 @@
             toast('Сначала сформируйте команду (шаг 4)', 'err');
             return;
         }
+        if (!/^interface\s+/im.test(cmd)) {
+            toast('Невалидная команда: должна начинаться с interface', 'err');
+            return;
+        }
+        if (/http\/rci/i.test(cmd)) {
+            toast('Невалидная команда: обнаружен фрагмент http/rci', 'err');
+            return;
+        }
 
         const btn = $('btnSend');
         setLoading(btn, true);
         try {
-            const r = await fetch(`${LOCAL_API}/command`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({command: cmd})
-            });
+            const isCreateMode = $('mode').value === 'create';
+            let r;
+            if (isCreateMode) {
+                const ifName = $('ifName').value.trim();
+                const address = splitCsv($('wgAddress').value.trim());
+                const dns = splitCsv($('wgDns').value.trim());
+                const allowedIps = splitCsv($('wgAllowedIps').value.trim());
+                const privateKey = $('wgPrivateKey').value.trim();
+                const peerPublicKey = $('wgPeerPublicKey').value.trim();
+                const endpoint = sanitizeEndpoint($('wgEndpoint').value);
+                if (!ifName || !privateKey || !peerPublicKey || !endpoint || !address.length || !allowedIps.length) {
+                    throw new Error('Для create заполните обязательные WireGuard-поля');
+                }
+                const ascCommand = buildAscCommand();
+                r = await fetch(`${LOCAL_API}/wireguard/create`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        ifName,
+                        privateKey,
+                        address,
+                        dns,
+                        listenPort: Number($('wgListenPort').value || 0),
+                        mtu: Number($('wgMtu').value || 0),
+                        peerPublicKey,
+                        presharedKey: $('wgPresharedKey').value.trim(),
+                        endpoint,
+                        allowedIps,
+                        persistentKeepalive: Number($('wgKeepalive').value || 0),
+                        ascCommand
+                    })
+                });
+            } else {
+                r = await fetch(`${LOCAL_API}/command`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({command: cmd})
+                });
+            }
             const raw = await r.text();
             let pretty = raw;
             try {
@@ -1432,7 +1632,10 @@
     // Config - Auto-parsing when selecting a file
     on('cfgFile', 'change', async () => {
         const f = $('cfgFile').files[0];
-        if (f) applyConfig(await f.text(), f.name);
+        if (!f) return;
+        const text = await f.text();
+        applyConfig(text, f.name);
+        await applyWgFromSelectedFile();
     });
 
     on('btnLoadCfg', 'click', async () => {
@@ -1441,7 +1644,13 @@
             toast('Выберите .conf файл', 'err');
             return;
         }
-        applyConfig(await f.text(), f.name);
+        const text = await f.text();
+        try {
+            applyConfig(text, f.name);
+            await applyWgFromSelectedFile();
+        } catch (e) {
+            toast('Ошибка загрузки конфига: ' + e.message, 'err');
+        }
     });
 
     // I-list
@@ -1549,7 +1758,15 @@
     on('btnExportLang', 'click', () => {
         window.location.href = `${LOCAL_API}/i18n/export-exe`;
     });
+    on('mode', 'change', setCreateModeVisibility);
+    on('wgInputMode', 'change', async () => {
+        setWgInputModeVisibility();
+        await applyWgFromSelectedFile();
+    });
+    wgFieldIds.forEach(id => on(id, 'input', rebuildResultIfExists));
     loadI18N();
+    setCreateModeVisibility();
+    setWgInputModeVisibility();
 
     // Ctrl+Enter = сформировать команду
     document.addEventListener('keydown', e => {

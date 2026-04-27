@@ -47,13 +47,36 @@ type appState struct {
 }
 
 type connectRequest struct {
-	Base     string `json:"base"`
-	Login    string `json:"login"`
-	Password string `json:"password"`
+	Base        string `json:"base"`
+	Login       string `json:"login"`
+	Password    string `json:"password"`
+	InsecureTLS bool   `json:"insecureTls"`
 }
 
 type commandRequest struct {
 	Command string `json:"command"`
+}
+
+type wireguardCreateRequest struct {
+	IfName              string   `json:"ifName"`
+	PrivateKey          string   `json:"privateKey"`
+	Address             []string `json:"address"`
+	DNS                 []string `json:"dns"`
+	ListenPort          int      `json:"listenPort"`
+	MTU                 int      `json:"mtu"`
+	PeerPublicKey       string   `json:"peerPublicKey"`
+	PresharedKey        string   `json:"presharedKey"`
+	Endpoint            string   `json:"endpoint"`
+	AllowedIPs          []string `json:"allowedIps"`
+	PersistentKeepalive int      `json:"persistentKeepalive"`
+	AscCommand          string   `json:"ascCommand"`
+}
+
+type commandStepResult struct {
+	Line   int    `json:"line"`
+	Cmd    string `json:"cmd"`
+	Status int    `json:"status"`
+	Body   string `json:"body,omitempty"`
 }
 
 type authInfo struct {
@@ -63,7 +86,7 @@ type authInfo struct {
 }
 
 func main() {
-	client, err := newRouterClient()
+	client, err := newRouterClient(false)
 	if err != nil {
 		log.Fatalf("init client: %v", err)
 	}
@@ -82,6 +105,7 @@ func main() {
 	mux.HandleFunc("POST /api/connect", st.connectHandler)
 	mux.HandleFunc("GET /api/interfaces", st.interfacesHandler)
 	mux.HandleFunc("POST /api/command", st.commandHandler)
+	mux.HandleFunc("POST /api/wireguard/create", st.wireguardCreateHandler)
 	mux.HandleFunc("GET /api/i18n", st.i18nHandler)
 	mux.HandleFunc("GET /api/i18n/export-exe", i18nExportExeHandler)
 	mux.HandleFunc("GET /api/open-external", openExternalHandler)
@@ -152,7 +176,7 @@ func openDesktopWindow(url string) error {
 	return nil
 }
 
-func newRouterClient() (*http.Client, error) {
+func newRouterClient(insecureTLS bool) (*http.Client, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
@@ -160,7 +184,7 @@ func newRouterClient() (*http.Client, error) {
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, // local router may use self-signed cert
+			InsecureSkipVerify: insecureTLS,
 		},
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
@@ -298,7 +322,7 @@ func (s *appState) connectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reset client on each connect attempt to avoid stale cookies.
-	client, err := newRouterClient()
+	client, err := newRouterClient(req.InsecureTLS)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("init client failed: %v", err))
 		return
@@ -397,25 +421,218 @@ func (s *appState) commandHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body := []map[string]any{
-		{
-			"parse": map[string]any{
-				"command": req.Command,
-				"execute": true,
-			},
-		},
+	lines := strings.Split(req.Command, "\n")
+	commands := make([]string, 0, len(lines))
+	for _, line := range lines {
+		c := strings.TrimSpace(line)
+		if c == "" {
+			continue
+		}
+		commands = append(commands, c)
 	}
-
-	payload, _ := json.Marshal(body)
-	respBody, status, err := s.requestRCI(base+"/rci/", http.MethodPost, payload)
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, fmt.Sprintf("command request failed: %v", err))
+	if len(commands) == 0 {
+		writeErr(w, http.StatusBadRequest, "no executable commands found")
 		return
 	}
 
+	results := make([]commandStepResult, 0, len(commands))
+	for idx, cmd := range commands {
+		body := []map[string]any{
+			{
+				"parse": map[string]any{
+					"command": cmd,
+					"execute": true,
+				},
+			},
+		}
+		payload, _ := json.Marshal(body)
+		respBody, status, err := s.requestRCI(base+"/rci/", http.MethodPost, payload)
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, fmt.Sprintf("command line %d failed: %v", idx+1, err))
+			return
+		}
+
+		step := commandStepResult{
+			Line:   idx + 1,
+			Cmd:    cmd,
+			Status: status,
+			Body:   truncate(respBody, 1000),
+		}
+		results = append(results, step)
+
+		if status < 200 || status >= 300 {
+			writeJSON(w, status, map[string]any{
+				"ok":      false,
+				"error":   fmt.Sprintf("router rejected command line %d", idx+1),
+				"results": results,
+			})
+			return
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_, _ = w.Write(respBody)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":      true,
+		"message": fmt.Sprintf("executed %d command lines", len(results)),
+		"results": results,
+	})
+}
+
+func (s *appState) wireguardCreateHandler(w http.ResponseWriter, r *http.Request) {
+	base, ok := s.connection()
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "not connected; call /api/connect first")
+		return
+	}
+
+	var req wireguardCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	req.IfName = strings.TrimSpace(req.IfName)
+	req.PrivateKey = strings.TrimSpace(req.PrivateKey)
+	req.PeerPublicKey = strings.TrimSpace(req.PeerPublicKey)
+	req.Endpoint = strings.TrimSpace(req.Endpoint)
+	req.AscCommand = strings.TrimSpace(req.AscCommand)
+	if req.IfName == "" || req.PrivateKey == "" || req.PeerPublicKey == "" || req.Endpoint == "" || len(req.Address) == 0 || len(req.AllowedIPs) == 0 {
+		writeErr(w, http.StatusBadRequest, "ifName, privateKey, address, peerPublicKey, endpoint, allowedIps are required")
+		return
+	}
+
+	steps := make([]commandStepResult, 0, 5)
+
+	sendJSONStep := func(line int, payload map[string]any) (int, []byte, error) {
+		raw, _ := json.Marshal(payload)
+		respBody, status, err := s.requestRCI(base+"/rci/", http.MethodPost, raw)
+		if err != nil {
+			return 0, nil, err
+		}
+		steps = append(steps, commandStepResult{
+			Line:   line,
+			Cmd:    string(raw),
+			Status: status,
+			Body:   truncate(respBody, 1000),
+		})
+		return status, respBody, nil
+	}
+
+	step1 := map[string]any{
+		"interface": map[string]any{
+			req.IfName: map[string]any{
+				"type": "Wireguard",
+			},
+		},
+	}
+	if status, _, err := sendJSONStep(1, step1); err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Sprintf("wireguard create step 1 failed: %v", err))
+		return
+	} else if status < 200 || status >= 300 {
+		writeJSON(w, status, map[string]any{"ok": false, "error": "router rejected wireguard create step 1", "results": steps})
+		return
+	}
+
+	step2Body := map[string]any{
+		"private-key": req.PrivateKey,
+		"address":     req.Address,
+	}
+	if len(req.DNS) > 0 {
+		step2Body["dns"] = req.DNS
+	}
+	if req.ListenPort > 0 {
+		step2Body["listen-port"] = req.ListenPort
+	}
+	if req.MTU > 0 {
+		step2Body["mtu"] = req.MTU
+	}
+	step2 := map[string]any{
+		"interface": map[string]any{
+			req.IfName: step2Body,
+		},
+	}
+	if status, _, err := sendJSONStep(2, step2); err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Sprintf("wireguard create step 2 failed: %v", err))
+		return
+	} else if status < 200 || status >= 300 {
+		writeJSON(w, status, map[string]any{"ok": false, "error": "router rejected wireguard create step 2", "results": steps})
+		return
+	}
+
+	peerObj := map[string]any{
+		"public-key":  req.PeerPublicKey,
+		"endpoint":    req.Endpoint,
+		"allowed-ips": req.AllowedIPs,
+	}
+	if req.PresharedKey != "" {
+		peerObj["preshared-key"] = req.PresharedKey
+	}
+	if req.PersistentKeepalive > 0 {
+		peerObj["persistent-keepalive"] = req.PersistentKeepalive
+	}
+	step3 := map[string]any{
+		"interface": map[string]any{
+			req.IfName: map[string]any{
+				"peer": map[string]any{
+					"peer1": peerObj,
+				},
+			},
+		},
+	}
+	if status, _, err := sendJSONStep(3, step3); err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Sprintf("wireguard create step 3 failed: %v", err))
+		return
+	} else if status < 200 || status >= 300 {
+		writeJSON(w, status, map[string]any{"ok": false, "error": "router rejected wireguard create step 3", "results": steps})
+		return
+	}
+
+	step4 := map[string]any{
+		"interface": map[string]any{
+			req.IfName: map[string]any{
+				"up": true,
+			},
+		},
+	}
+	if status, _, err := sendJSONStep(4, step4); err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Sprintf("wireguard create step 4 failed: %v", err))
+		return
+	} else if status < 200 || status >= 300 {
+		writeJSON(w, status, map[string]any{"ok": false, "error": "router rejected wireguard create step 4", "results": steps})
+		return
+	}
+
+	if req.AscCommand != "" {
+		payload, _ := json.Marshal([]map[string]any{
+			{
+				"parse": map[string]any{
+					"command": req.AscCommand,
+					"execute": true,
+				},
+			},
+		})
+		respBody, status, err := s.requestRCI(base+"/rci/", http.MethodPost, payload)
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, fmt.Sprintf("wireguard create asc step failed: %v", err))
+			return
+		}
+		steps = append(steps, commandStepResult{
+			Line:   5,
+			Cmd:    req.AscCommand,
+			Status: status,
+			Body:   truncate(respBody, 1000),
+		})
+		if status < 200 || status >= 300 {
+			writeJSON(w, status, map[string]any{"ok": false, "error": "router rejected asc command", "results": steps})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": "wireguard interface created via JSON RCI",
+		"results": steps,
+	})
 }
 
 func (s *appState) fetchAuthInfo(base string) (authInfo, error) {
